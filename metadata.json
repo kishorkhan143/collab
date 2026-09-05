@@ -1,0 +1,6 @@
+{
+  "name": "CollabBoard",
+  "description": "Multi-tenant team task management platform with workspaces, Kanban boards, role-based access, and activity tracking.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
