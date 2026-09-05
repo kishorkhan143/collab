@@ -1,4 +1,5 @@
 import { Workspace, WorkspaceMember, Board, Column, Task, Comment, Activity, User, Role, Priority } from '../types';
+import { clientBackend } from './clientBackend';
 
 const TOKEN_KEY = 'collabboard_jwt_token';
 
@@ -8,7 +9,15 @@ export const authStorage = {
   clearToken: () => localStorage.removeItem(TOKEN_KEY),
 };
 
+// Tracks whether the backend API server is online or if we should run in client-side storage mode
+let isServerOnline: boolean | null = null;
+
 async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  // If we already know the server is not reachable (e.g. deployed statically on Vercel/Netlify), use client storage
+  if (isServerOnline === false) {
+    return clientBackend.handle<T>(endpoint, options);
+  }
+
   const token = authStorage.getToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -19,19 +28,39 @@ async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const response = await fetch(endpoint, {
-    ...options,
-    headers,
-  });
+  try {
+    const response = await fetch(endpoint, {
+      ...options,
+      headers,
+    });
 
-  const data = await response.json().catch(() => ({}));
+    const contentType = response.headers.get('content-type') || '';
 
-  if (!response.ok) {
-    const errorMsg = data.message || `Request failed with status ${response.status}`;
-    throw new Error(errorMsg);
+    // If Vercel or a static host returns 404/405 or fallback index.html instead of JSON API response
+    if (response.status === 404 || response.status === 405 || (contentType.includes('text/html') && !response.ok)) {
+      console.info('Backend API unavailable (404/405). Falling back seamlessly to browser client database.');
+      isServerOnline = false;
+      return clientBackend.handle<T>(endpoint, options);
+    }
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      const errorMsg = data.message || `Request failed with status ${response.status}`;
+      throw new Error(errorMsg);
+    }
+
+    isServerOnline = true;
+    return data as T;
+  } catch (err: any) {
+    // If network error (e.g. fetch failed or connection refused), fallback to client backend
+    if (isServerOnline === null || isServerOnline === false) {
+      console.info('Backend network connection failed. Switching to browser client database.');
+      isServerOnline = false;
+      return clientBackend.handle<T>(endpoint, options);
+    }
+    throw err;
   }
-
-  return data as T;
 }
 
 export const api = {
